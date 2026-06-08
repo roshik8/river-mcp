@@ -1,0 +1,281 @@
+# river-sat-mcp — измерение ширины рек и поиск завалов по спутниковым снимкам через MCP
+
+MCP-сервер, который даёт агенту (Claude Desktop / Cursor / VS Code) набор инструментов
+для анализа речных русел по спутниковым снимкам Sentinel-2-подобного формата (GeoTIFF):
+строит водную маску, измеряет ширину реки вдоль центральной линии и помечает
+**кандидатов** на сужения / завалы / блокировки русла.
+
+Проект работает «из коробки» на встроенной **синтетической** сцене
+(`data/synthetic_river.tif`) — без ключей, без сети, полностью воспроизводимо. Как
+подключить реальные снимки — см. раздел [«Реальные снимки»](#реальные-снимки).
+
+---
+
+## 1. Принципы MCP (как это устроено здесь)
+
+**Как агент/IDE подключается к серверу.** MCP (Model Context Protocol) — это протокол
+поверх JSON-RPC, по которому LLM-агент обнаруживает и вызывает внешние инструменты.
+Клиент (Claude Desktop) запускает наш сервер как дочерний процесс и общается с ним по
+транспорту **stdio**: запросы/ответы протокола идут через stdout процесса, а наши
+логи — строго через stderr (см. ниже, это важно). При старте агент шлёт
+`list_tools`, получает имена инструментов, их описания и JSON-схемы параметров
+(схемы FastMCP генерирует автоматически из type hints функций), а затем по запросу
+пользователя сам решает, какой инструмент и с какими аргументами вызвать через
+`call_tool`.
+
+**Что здесь считается «tool».** Tool — это одна Python-функция, помеченная
+декоратором `@mcp.tool()`, с понятным именем, docstring-описанием (его читает агент,
+чтобы понять, когда инструмент применять) и типизированными параметрами. Каждый
+инструмент возвращает **структурированный объект (JSON)**, а не текст: например,
+`measure_river_width` отдаёт словарь со статистикой ширины и выборкой профиля. В этом
+сервере 4 инструмента (см. раздел 4).
+
+---
+
+## 2. Установка и окружение
+
+Требуется Python ≥ 3.10 (рекомендуется 3.12).
+
+```bash
+cd river-mcp
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# (опционально) сгенерировать заново синтетическую сцену
+python scripts/make_synthetic_scene.py
+
+# проверить пайплайн без MCP
+python scripts/run_local_demo.py
+
+# проверить через настоящий MCP-протокол (поднимает сервер по stdio)
+python scripts/test_mcp_client.py
+```
+
+Секреты не нужны. Файл [`.env.example`](.env.example) описывает только необязательные
+переменные (например, переопределение каталога данных). `.env` в `.gitignore`.
+
+---
+
+## 3. Как включить в Claude Desktop (4 шага)
+
+1. Установите зависимости в venv (раздел 2). Запомните **абсолютный** путь к
+   `.venv/bin/python` и к папке проекта.
+2. Откройте конфиг Claude Desktop: **Settings → Developer → Edit Config** (он же файл
+   `claude_desktop_config.json`: macOS `~/Library/Application Support/Claude/`,
+   Windows `%APPDATA%\Claude\`).
+3. Добавьте блок из [`configs/claude_desktop_config.json`](configs/claude_desktop_config.json),
+   подставив свои абсолютные пути вместо `/ABSOLUTE/PATH/TO/river-mcp`.
+4. Полностью перезапустите Claude Desktop. В чате появится значок инструментов —
+   проверьте, что виден сервер `river-sat` с 4 инструментами.
+
+> Claude Desktop — MCP-клиент (формально не «IDE»). Код сервера идентичен для Cursor /
+> VS Code — меняется только файл конфига:
+> - **Cursor:** [`configs/cursor_mcp.json`](configs/cursor_mcp.json) → положить в
+>   `~/.cursor/mcp.json` или `.cursor/mcp.json` в проекте (тот же формат с `mcpServers`).
+> - **VS Code:** [`.vscode/mcp.json`](.vscode/mcp.json) уже лежит в проекте и активируется
+>   автоматически, если открыть папку `river-mcp` как workspace. Формат VS Code другой
+>   (ключ `servers`, поле `type: "stdio"`), но благодаря `${workspaceFolder}` абсолютные
+>   пути не нужны. На Windows замените интерпретатор на `${workspaceFolder}/.venv/Scripts/python.exe`.
+>   Управление: палитра команд → `MCP: List Servers` (там же `Show Output` для логов),
+>   агент работает в Copilot Chat в режиме agent mode.
+
+Для отладки protocol-уровня удобен инспектор: `mcp dev river_mcp/server.py`.
+
+---
+
+## 4. Инструменты
+
+| Инструмент | Назначение | Ключевые параметры |
+|------------|-----------|--------------------|
+| `list_scenes` | инвентаризация локальных GeoTIFF (размер, каналы, CRS, границы) | — |
+| `compute_water_mask` | водная маска по NDWI/MNDWI + PNG-превью | `scene`, `index` |
+| `measure_river_width` | профиль ширины вдоль центральной линии + статистика | `scene`, `index`, `max_samples` |
+| `detect_obstruction_candidates` | кандидаты на сужения/завалы русла | `scene`, `index`, `sensitivity` |
+| `detect_crossings` | кандидаты на мосты/дамбы: разрывы русла с водой по обе стороны | `scene`, `index`, `max_gap_px` |
+
+Метод: водный индекс **NDWI** = (Green−NIR)/(Green+NIR) или **MNDWI** =
+(Green−SWIR)/(Green+SWIR, лучше для мутной воды) → порог **Оцу** (по «живым»
+пикселям, NaN = не вода) → морфологическое **закрытие** тонких разрывов + отбор **всей
+воды** крупнее порога площади → **скелетонизация** (центральная линия) → ширина из
+**distance transform**
+(× размер пикселя) → кандидаты-сужения как точки, где локальная ширина падает ниже
+`sensitivity × медиана`. Полные форматы ответов — в [`docs/contract.md`](docs/contract.md).
+
+---
+
+## 5. Безопасность и ограничения
+
+- Инструменты принимают **только имя файла** (например, `synthetic_river.tif`), а не
+  путь. Имя джойнится с каталогом данных, резолвится (`..`, симлинки) и проверяется,
+  что результат остаётся **внутри `data/`**. Любой выход за пределы → `PermissionError`.
+  Проверено: запрос `../../etc/passwd` отклоняется (см. лог в `data/outputs/server_log.txt`).
+- Разрешены только расширения `.tif`/`.tiff`. Запись (превью) — только в `data/outputs/`.
+- Каталог данных можно переопределить переменной `RIVER_MCP_DATA_DIR`.
+- **Завалы:** на снимках 10 м/пиксель отдельный завал не разрешается физически.
+  `detect_obstruction_candidates` выдаёт **кандидатов для ручной проверки**
+  (сужения/блокировки), а не подтверждённые завалы — это явно указано в ответе (`note`).
+
+---
+
+## 6. Проверочные запросы и логи
+
+5 из 5 функциональных запросов приводят к реальному вызову MCP-инструмента (требование
+ДЗ: ≥ 3). Таблица «запрос → ожидаемый инструмент → подтверждение» и сам лог:
+[`docs/demo_run.md`](docs/demo_run.md). Сырой серверный лог хранится в
+[`data/outputs/server_log.txt`](data/outputs/server_log.txt).
+
+Логирование идёт в **stderr** (в stdio-сервере stdout занят протоколом — `print()` в
+stdout сломал бы связь). Каждая строка содержит: имя инструмента, входные параметры
+(без секретов), статус `success`/`error`. Пример:
+
+```
+INFO tool=detect_obstruction_candidates params={"scene": "synthetic_river.tif", "index": "ndwi", "sensitivity": 0.6} status=success count=3
+INFO tool=measure_river_width params={"scene": "../../etc/passwd", ...} status=error PermissionError: ...
+```
+
+---
+
+## 7. Подтверждения ссылками на код
+
+**MCP-сервер (подъём + регистрация инструментов):** `river_mcp/server.py`
+- настройка логгера в stderr — `server.py:L35–L40`
+- создание сервера `FastMCP("river-sat")` — `server.py:L42`
+- хелпер логирования вызовов — `server.py:L45–L46`
+- запуск по stdio (`mcp.run()`) — `server.py:L255–L257`
+
+**Инструменты** (реализация + где лог для дебага):
+- `list_scenes` — `server.py:L50–L78` (лог: `server.py:L74`)
+- `compute_water_mask` — `server.py:L82–L131` (лог: `server.py:L124`; запись превью: `server.py:L118`)
+- `measure_river_width` — `server.py:L133–L175` (лог: `server.py:L168`)
+- `detect_obstruction_candidates` — `server.py:L177–L218` (лог: `server.py:L212`)
+- `detect_crossings` — `server.py:L220–L253` (лог: `server.py:L248`); ядро — `analysis.py:L186–L236`
+
+**Геоанализ:** `river_mcp/analysis.py`
+- водный индекс NDWI/MNDWI — `analysis.py:L54–L63`
+- водная маска (Оцу, NaN-safe, сшивка разрывов, вся вода) — `analysis.py:L65–L92`
+- профиль ширины (скелет + distance transform) — `analysis.py:L102–L128`
+- кандидаты-сужения — `analysis.py:L130–L184`
+
+**Защита доступа к файлам:** `river_mcp/config.py:L26–L39` (`resolve_scene`).
+
+**Контракт результатов:** [`docs/contract.md`](docs/contract.md).
+
+**Пример подтверждения вызова:** запрос «найди сужения, чувствительность 0.6» →
+ожидаемый tool `detect_obstruction_candidates` → подтверждение в логе
+`data/outputs/server_log.txt` (строка со `status=success count=3`) и в
+[`docs/demo_run.md`](docs/demo_run.md).
+
+---
+
+## 8. Реальные снимки
+
+Синтетику можно заменить настоящими снимками Sentinel-2 (10 м/пиксель). Помни про
+ограничение из раздела 5: ширина реки измеряется хорошо, отдельные завалы на 10 м
+не разрешаются — инструмент даёт кандидатов-сужения.
+
+### Вариант А — скриптом (рекомендуется, без регистрации)
+
+`scripts/fetch_real_scene.py` качает сцену с **Microsoft Planetary Computer** (ключи
+не нужны, ссылки подписываются автоматически) и собирает GeoTIFF сразу в нужном
+порядке каналов `green, red, nir, swir`.
+
+```bash
+pip install -r requirements-download.txt
+
+# по умолчанию — излучина Одера у Франкфурта-на-Одере
+python scripts/fetch_real_scene.py
+
+# свой участок и дата:
+python scripts/fetch_real_scene.py \
+    --bbox 14.50 52.30 14.62 52.40 \
+    --date 2023-06-01/2023-09-30 \
+    --max-cloud 10 \
+    --name oder_river.tif
+```
+
+После скачивания вызывай инструменты со `scene="<имя>.tif"`. Готовые проверенные
+участки — ниже.
+
+### Готовые пресеты (проверенные участки)
+
+Скопируй нужную команду целиком. Для речной воды используй `index="mndwi"`.
+
+**Тавда, г. Тавда (Свердловская обл.) — равнинная, очень извилистая.** Только летнее
+окно: зимой река подо льдом и водный индекс не сработает.
+```bash
+python scripts/fetch_real_scene.py \
+  --bbox 65.18 57.99 65.38 58.11 \
+  --date 2023-06-01/2023-09-15 --max-cloud 20 --name tavda.tif
+```
+
+**Тура, г. Туринск (Свердловская обл.) — равнинные меандры, чуть уже Тавды.**
+```bash
+python scripts/fetch_real_scene.py \
+  --bbox 63.60 57.98 63.82 58.10 \
+  --date 2023-06-01/2023-09-15 --max-cloud 20 --name tura_turinsk.tif
+```
+
+**Джамуна (Брахмапутра) у Сираджганджа, Бангладеш — разветвлённое русло, много
+сужений в узлах. Сухой сезон даёт чистое небо.** Лучший выбор для демонстрации
+`detect_obstruction_candidates`.
+```bash
+python scripts/fetch_real_scene.py \
+  --bbox 89.65 24.45 89.79 24.58 \
+  --date 2023-12-01/2024-03-15 --max-cloud 10 --name jamuna_sirajganj.tif
+```
+
+**Укаяли у Пукальпы, Перу — классические меандры, самый чистый профиль ширины.**
+Амазония облачная: окно дат шире, порог облачности выше, возможны повторы.
+```bash
+python scripts/fetch_real_scene.py \
+  --bbox -74.62 -8.50 -74.46 -8.34 \
+  --date 2023-05-01/2023-09-30 --max-cloud 20 --name ucayali_pucallpa.tif
+```
+
+**Одер у Франкфурта-на-Одере — умеренный климат, надёжно (это же значение по
+умолчанию).** Альтернатива рядом — Шпрее в Берлине: `13.40 52.45 13.52 52.52`.
+```bash
+python scripts/fetch_real_scene.py --name oder_river.tif
+```
+
+Подсказки: уральские реки (Тавда, Тура) уже тропических — русло ~10–20 пикселей, для
+измерения ширины этого хватает. Если по окну дат сцена не нашлась — расширь `--date`
+или подними `--max-cloud`. Свой участок проще всего подобрать прямоугольником на
+https://bboxfinder.com (выдаёт `minlon minlat maxlon maxlat` в WGS84).
+
+### Вариант Б — вручную через браузер (без кода)
+
+1. Открой **Copernicus Browser** (browser.dataspace.copernicus.eu) — официальный портал
+   ESA, бесплатная регистрация. Или EO Browser.
+2. Найди участок реки, выбери Sentinel-2 L2A с малой облачностью.
+3. Скачай аналитический GeoTIFF с каналами B03, B04, B08, B11.
+4. Собери их в один 4-канальный GeoTIFF в порядке `green(B03), red(B04), nir(B08),
+   swir(B11)` (B11 — 20 м, пересемплируй до 10 м), положи в `data/`.
+
+Скриптовый вариант делает шаги 3–4 за тебя, поэтому для ДЗ он удобнее.
+
+---
+
+## Структура проекта
+
+```
+river-mcp/
+├── river_mcp/
+│   ├── server.py        # MCP-сервер + 4 инструмента + логирование
+│   ├── analysis.py      # геоанализ (индексы, маска, ширина, кандидаты)
+│   └── config.py        # каталог данных + защита путей
+├── scripts/
+│   ├── make_synthetic_scene.py  # генератор демо-сцены
+│   ├── fetch_real_scene.py      # загрузчик реальных снимков Sentinel-2
+│   ├── run_local_demo.py        # отладка пайплайна без MCP
+│   └── test_mcp_client.py       # E2E-тест через MCP-протокол
+├── data/
+│   ├── synthetic_river.tif      # демо-сцена
+│   └── outputs/                 # PNG-превью + server_log.txt
+├── configs/             # claude_desktop_config.json, cursor_mcp.json
+├── .vscode/mcp.json     # конфиг для VS Code (агент mode в Copilot Chat)
+├── docs/                # contract.md, demo_run.md
+├── requirements.txt, pyproject.toml, .env.example, .gitignore
+└── requirements-download.txt  # доп. зависимости только для загрузчика снимков
+```

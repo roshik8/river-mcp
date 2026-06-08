@@ -1,0 +1,14 @@
+2026-06-04 10:38:26,143 [river-mcp] INFO starting river-sat MCP server (stdio); data_dir=/home/claude/river-mcp/data
+2026-06-04 10:38:26,150 [river-mcp] INFO Processing request of type CallToolRequest
+2026-06-04 10:38:26,167 [river-mcp] INFO tool=list_scenes params={} status=success count=1
+2026-06-04 10:38:26,168 [river-mcp] INFO Processing request of type ListToolsRequest
+2026-06-04 10:38:26,170 [river-mcp] INFO Processing request of type CallToolRequest
+2026-06-04 10:38:26,518 [river-mcp] INFO tool=compute_water_mask params={"scene": "synthetic_river.tif", "index": "ndwi"} status=success water_fraction=0.01969
+2026-06-04 10:38:26,520 [river-mcp] INFO Processing request of type CallToolRequest
+2026-06-04 10:38:26,570 [river-mcp] INFO tool=measure_river_width params={"scene": "synthetic_river.tif", "index": "ndwi", "max_samples": 3} status=success median_m=141.42
+2026-06-04 10:38:26,573 [river-mcp] INFO Processing request of type CallToolRequest
+2026-06-04 10:38:26,619 [river-mcp] INFO tool=detect_obstruction_candidates params={"scene": "synthetic_river.tif", "index": "ndwi", "sensitivity": 0.6} status=success count=3
+2026-06-04 10:38:26,620 [river-mcp] INFO Processing request of type CallToolRequest
+2026-06-04 10:38:26,655 [river-mcp] INFO tool=compute_water_mask params={"scene": "synthetic_river.tif", "index": "mndwi"} status=success water_fraction=0.01969
+2026-06-04 10:38:26,656 [river-mcp] INFO Processing request of type CallToolRequest
+2026-06-04 10:38:26,656 [river-mcp] INFO tool=measure_river_width params={"scene": "../../etc/passwd", "index": "ndwi", "max_samples": 25} status=error PermissionError: scene must be a bare filename inside the data dir, got: '../../etc/passwd'

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "river-sat": {
+      "command": "/ABSOLUTE/PATH/TO/river-mcp/.venv/bin/python",
+      "args": ["-m", "river_mcp.server"],
+      "env": {
+        "PYTHONPATH": "/ABSOLUTE/PATH/TO/river-mcp"
+      }
+    }
+  }
+}

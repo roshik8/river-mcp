@@ -1,0 +1,21 @@
+# secrets / env
+.env
+*.key
+*.pem
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Keep the bundled demo scene + demo outputs so the homework is reproducible:
+#   data/synthetic_river.tif
+#   data/outputs/*.png
+#   data/outputs/server_log.txt
+# (nothing under data/ is ignored)

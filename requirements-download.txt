@@ -1,0 +1,7 @@
+# Optional: only needed to download REAL Sentinel-2 scenes via
+# scripts/fetch_real_scene.py. The core MCP server does NOT need these.
+#   pip install -r requirements-download.txt
+pystac-client>=0.8
+planetary-computer>=1.0
+rioxarray>=0.15
+xarray>=2024.0

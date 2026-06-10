@@ -1,6 +1,6 @@
 # river-sat-mcp — измерение ширины рек и поиск завалов по спутниковым снимкам через MCP
 
-MCP-сервер, который даёт агенту (Claude Desktop / Cursor / VS Code) набор инструментов
+MCP-сервер, который даёт агенту в VS Code набор инструментов
 для анализа речных русел по спутниковым снимкам Sentinel-2-подобного формата (GeoTIFF):
 строит водную маску, измеряет ширину реки вдоль центральной линии и помечает
 **кандидатов** на сужения / завалы / блокировки русла.
@@ -15,7 +15,7 @@ MCP-сервер, который даёт агенту (Claude Desktop / Cursor 
 
 **Как агент/IDE подключается к серверу.** MCP (Model Context Protocol) — это протокол
 поверх JSON-RPC, по которому LLM-агент обнаруживает и вызывает внешние инструменты.
-Клиент (Claude Desktop) запускает наш сервер как дочерний процесс и общается с ним по
+Клиент (VS Code) запускает наш сервер как дочерний процесс и общается с ним по
 транспорту **stdio**: запросы/ответы протокола идут через stdout процесса, а наши
 логи — строго через stderr (см. ниже, это важно). При старте агент шлёт
 `list_tools`, получает имена инструментов, их описания и JSON-схемы параметров
@@ -28,7 +28,7 @@ MCP-сервер, который даёт агенту (Claude Desktop / Cursor 
 чтобы понять, когда инструмент применять) и типизированными параметрами. Каждый
 инструмент возвращает **структурированный объект (JSON)**, а не текст: например,
 `measure_river_width` отдаёт словарь со статистикой ширины и выборкой профиля. В этом
-сервере 4 инструмента (см. раздел 4).
+сервере 5 инструментов (см. раздел 4).
 
 ---
 
@@ -57,30 +57,24 @@ python scripts/test_mcp_client.py
 
 ---
 
-## 3. Как включить в Claude Desktop (4 шага)
+## 3. Как подключить в VS Code
 
-1. Установите зависимости в venv (раздел 2). Запомните **абсолютный** путь к
-   `.venv/bin/python` и к папке проекта.
-2. Откройте конфиг Claude Desktop: **Settings → Developer → Edit Config** (он же файл
-   `claude_desktop_config.json`: macOS `~/Library/Application Support/Claude/`,
-   Windows `%APPDATA%\Claude\`).
-3. Добавьте блок из [`configs/claude_desktop_config.json`](configs/claude_desktop_config.json),
-   подставив свои абсолютные пути вместо `/ABSOLUTE/PATH/TO/river-mcp`.
-4. Полностью перезапустите Claude Desktop. В чате появится значок инструментов —
-   проверьте, что виден сервер `river-sat` с 4 инструментами.
+Конфиг [`.vscode/mcp.json`](.vscode/mcp.json) уже лежит в репозитории и подхватывается
+автоматически при открытии папки проекта.
 
-> Claude Desktop — MCP-клиент (формально не «IDE»). Код сервера идентичен для Cursor /
-> VS Code — меняется только файл конфига:
-> - **Cursor:** [`configs/cursor_mcp.json`](configs/cursor_mcp.json) → положить в
->   `~/.cursor/mcp.json` или `.cursor/mcp.json` в проекте (тот же формат с `mcpServers`).
-> - **VS Code:** [`.vscode/mcp.json`](.vscode/mcp.json) уже лежит в проекте и активируется
->   автоматически, если открыть папку `river-mcp` как workspace. Формат VS Code другой
->   (ключ `servers`, поле `type: "stdio"`), но благодаря `${workspaceFolder}` абсолютные
->   пути не нужны. На Windows замените интерпретатор на `${workspaceFolder}/.venv/Scripts/python.exe`.
->   Управление: палитра команд → `MCP: List Servers` (там же `Show Output` для логов),
->   агент работает в Copilot Chat в режиме agent mode.
+1. Открой папку `river-mcp` как workspace (File → Open Folder → выбрать `river-mcp`).
+2. Установи расширения **GitHub Copilot** и **GitHub Copilot Chat**, войди в аккаунт
+   GitHub (есть бесплатный тариф).
+3. Создай venv и поставь зависимости (раздел 2). Файл [`.vscode/mcp.json`](.vscode/mcp.json)
+   уже в проекте; на **Windows** проверь, что `command` указывает на
+   `${workspaceFolder}/.venv/Scripts/python.exe` (на macOS/Linux — `.../.venv/bin/python`).
+   Благодаря `${workspaceFolder}` абсолютные пути прописывать не нужно.
+4. Запусти сервер: Ctrl/Cmd+Shift+P → `MCP: List Servers` → `river-sat` → **Start**
+   (логи — там же через **Show Output**).
+5. Открой Copilot Chat, переключи режим на **Agent** — пять инструментов `river-sat`
+   станут доступны агенту.
 
-Для отладки protocol-уровня удобен инспектор: `mcp dev river_mcp/server.py`.
+Для отладки на уровне протокола удобен инспектор: `mcp dev river_mcp/server.py`.
 
 ---
 
@@ -262,7 +256,7 @@ https://bboxfinder.com (выдаёт `minlon minlat maxlon maxlat` в WGS84).
 ```
 river-mcp/
 ├── river_mcp/
-│   ├── server.py        # MCP-сервер + 4 инструмента + логирование
+│   ├── server.py        # MCP-сервер + 5 инструментов + логирование
 │   ├── analysis.py      # геоанализ (индексы, маска, ширина, кандидаты)
 │   └── config.py        # каталог данных + защита путей
 ├── scripts/
@@ -273,7 +267,6 @@ river-mcp/
 ├── data/
 │   ├── synthetic_river.tif      # демо-сцена
 │   └── outputs/                 # PNG-превью + server_log.txt
-├── configs/             # claude_desktop_config.json, cursor_mcp.json
 ├── .vscode/mcp.json     # конфиг для VS Code (агент mode в Copilot Chat)
 ├── docs/                # contract.md, demo_run.md
 ├── requirements.txt, pyproject.toml, .env.example, .gitignore

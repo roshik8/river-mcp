@@ -82,7 +82,10 @@ def list_scenes() -> dict:
 # --- tool 2 ------------------------------------------------------------------
 @mcp.tool()
 def compute_water_mask(scene: str, index: str = "ndwi") -> dict:
-    """Compute a water mask for a scene using a water index, and save a PNG preview.
+    """Compute a water mask of the main river for a scene, and save a PNG preview.
+
+    Keeps the largest connected water body (the main river) and drops separate ponds
+    / wet fields; see analysis.water_mask for caveats (touching towns, wide gaps).
 
     Args:
         scene: bare filename of a GeoTIFF in the data dir (see list_scenes).
@@ -137,6 +140,7 @@ def measure_river_width(scene: str, index: str = "ndwi", max_samples: int = 25) 
 
     Width is estimated from the distance transform of the water mask sampled along
     the morphological skeleton, converted to metres via the scene's pixel size.
+    Operates on the main river (largest connected water body).
 
     Args:
         scene: bare filename of a GeoTIFF in the data dir.
@@ -183,7 +187,7 @@ def detect_obstruction_candidates(scene: str, index: str = "ndwi",
     A point is flagged when its local width drops below `sensitivity * median width`.
     These are candidates for human review (e.g. possible log jams, debris dams, or
     natural narrows), NOT confirmed obstructions -- 10 m imagery cannot resolve an
-    individual log jam (see README).
+    individual log jam (see README). Operates on the main river (largest water body).
 
     Args:
         scene: bare filename of a GeoTIFF in the data dir.

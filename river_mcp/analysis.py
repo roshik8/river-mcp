@@ -63,15 +63,18 @@ def water_index(scene: Scene, kind: str = "ndwi") -> np.ndarray:
 
 
 def water_mask(index: np.ndarray, min_blob_pixels: int = 64):
-    """Otsu-threshold the index into a water mask.
+    """Otsu-threshold the index into a water mask of the MAIN RIVER.
 
     NaN-safe: Otsu is computed only over finite pixels; NaN is treated as non-water.
+    A morphological closing bridges thin gaps (bridges, sandbars, short turbid
+    stretches) so the channel does not get severed, then only the SINGLE LARGEST
+    connected component is kept -- i.e. the main river. Separate water bodies
+    (isolated ponds, distant wet fields) are dropped.
 
-    Real-data robustness: a morphological closing bridges thin gaps (bridges,
-    sandbars, short turbid stretches) so the channel does not get split, and then
-    ALL water bodies larger than `min_blob_pixels` are kept (not only the single
-    largest) so a river broken into several pieces is preserved in full. Note this
-    also keeps large standing water (lakes, oxbows) if present.
+    Caveats: a wide gap the closing cannot bridge may split the river, leaving only
+    the larger piece; and a town that physically touches the river stays (it is one
+    connected blob with the channel) -- pick an AOI without the town to avoid it,
+    since morphology cannot separate spectrally-similar, touching features.
     """
     finite = np.isfinite(index)
     if not finite.any():
@@ -85,10 +88,10 @@ def water_mask(index: np.ndarray, min_blob_pixels: int = 64):
     if n == 0:
         return np.zeros(index.shape, dtype=bool), thr
     sizes = ndimage.sum(np.ones_like(labels), labels, index=range(1, n + 1))
-    keep_ids = np.where(sizes >= min_blob_pixels)[0] + 1
-    if keep_ids.size == 0:
+    biggest = int(np.argmax(sizes)) + 1  # largest connected component = the river
+    if sizes[biggest - 1] < min_blob_pixels:
         return np.zeros(index.shape, dtype=bool), thr
-    return np.isin(labels, keep_ids), thr
+    return labels == biggest, thr
 
 
 def _to_lonlat(scene: Scene, cols, rows):

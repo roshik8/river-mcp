@@ -60,21 +60,33 @@ python scripts/test_mcp_client.py
 ## 3. Как подключить в VS Code
 
 Конфиг [`.vscode/mcp.json`](.vscode/mcp.json) уже лежит в репозитории и подхватывается
-автоматически при открытии папки проекта.
+автоматически при открытии папки проекта. **Абсолютные пути прописывать не нужно** —
+`${workspaceFolder}` разрешается динамически.
+
+**Шаги подключения:**
 
 1. Открой папку `river-mcp` как workspace (File → Open Folder → выбрать `river-mcp`).
 2. Установи расширения **GitHub Copilot** и **GitHub Copilot Chat**, войди в аккаунт
    GitHub (есть бесплатный тариф).
-3. Создай venv и поставь зависимости (раздел 2). Файл [`.vscode/mcp.json`](.vscode/mcp.json)
-   уже в проекте; на **Windows** проверь, что `command` указывает на
-   `${workspaceFolder}/.venv/Scripts/python.exe` (на macOS/Linux — `.../.venv/bin/python`).
-   Благодаря `${workspaceFolder}` абсолютные пути прописывать не нужно.
-4. Запусти сервер: Ctrl/Cmd+Shift+P → `MCP: List Servers` → `river-sat` → **Start**
-   (логи — там же через **Show Output**).
-5. Открой Copilot Chat, переключи режим на **Agent** — пять инструментов `river-sat`
-   станут доступны агенту.
+3. Создай venv и поставь зависимости (раздел 2):
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate         # Windows
+   # source .venv/bin/activate   # macOS/Linux
+   pip install -r requirements.txt
+   ```
+4. Перезагрузи VS Code (или нажми F5) — сервер станет доступен в MCP лист.
+5. Запусти сервер: Ctrl/Cmd+Shift+P → `MCP: List Servers` → выбери `river-sat` → **Start**
+   (логи см. в `MCP: Show Output`).
+6. Открой **Copilot Chat** (Ctrl/Cmd+L), переключи режим на **Agent** (кнопка слева) —
+   пять инструментов `river-sat` станут видны и готовы к использованию.
 
-Для отладки на уровне протокола удобен инспектор: `mcp dev river_mcp/server.py`.
+**Проверка:** если сервер стартовал, в выводе `Show Output` будут строки вида:
+```
+INFO starting river-sat MCP server (stdio); data_dir=C:\Users\...\river-mcp\data
+```
+
+Для отладки протокола: `Ctrl/Cmd+Shift+P` → `MCP dev` → выбери `river_mcp/server.py`.
 
 ---
 
